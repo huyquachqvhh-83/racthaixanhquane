@@ -267,28 +267,72 @@ function closeDetail() {
 }
 
 /* ---------- trang quản trị ---------- */
+let adminTab = 'listings', adminData = { listings: [], users: [], phones: {} };
 async function renderAdmin() {
   if (!isAdmin) { $('adminTable').innerHTML = '<p class="form-message">Bạn không có quyền truy cập trang này. Hãy đăng nhập bằng tài khoản admin.</p>'; return; }
-  const all = await loadListings();
-  const count = s => all.filter(x => statusOf(x) === s).length;
-  const { count: users } = await sb.from('profiles').select('id', { count: 'exact', head: true });
-  $('adminStats').textContent = `${all.length} tin · ${count('open')} đang mở · ${count('closed')} đã chốt · ${count('expired')} hết hạn · ${count('hidden')} bị ẩn · ${users ?? '?'} tài khoản`;
-  $('adminTable').innerHTML = '';
-  all.forEach(item => {
+  const [ls, us, ct] = await Promise.all([loadListings(), sb.rpc('admin_list_users'), sb.from('listing_contacts').select('listing_id, phone')]);
+  if (us.error) toast('Chưa tải được tài khoản — đã chạy supabase-admin.sql chưa? ' + us.error.message, 'error');
+  adminData = { listings: ls, users: us.data || [], phones: Object.fromEntries((ct.data || []).map(c => [c.listing_id, c.phone])) };
+  $('tabListings').onclick = () => { adminTab = 'listings'; drawAdmin(); };
+  $('tabUsers').onclick = () => { adminTab = 'users'; drawAdmin(); };
+  $('adminSearch').oninput = drawAdmin;
+  $('purgeExpired').onclick = async () => {
+    const n = adminData.listings.filter(x => statusOf(x) === 'expired').length;
+    if (!n) return toast('Không có tin hết hạn.');
+    if (!confirm(`Xóa vĩnh viễn ${n} tin đã hết hạn?`)) return;
+    const { error } = await sb.from('listings').delete().lt('expires_at', new Date().toISOString());
+    error ? toast(error.message, 'error') : (toast(`Đã xóa ${n} tin hết hạn.`, 'ok'), renderAdmin());
+  };
+  drawAdmin();
+}
+async function adminAct(promise, msg) {
+  const { error } = await promise;
+  if (error) return toast('Lỗi: ' + error.message, 'error');
+  toast(msg, 'ok'); renderAdmin();
+}
+function drawAdmin() {
+  const { listings: ls, users: us, phones } = adminData, q = normalize($('adminSearch').value.trim());
+  const emailOf = Object.fromEntries(us.map(u => [u.id, u.email]));
+  const count = s => ls.filter(x => statusOf(x) === s).length;
+  $('adminStats').textContent = `${ls.length} tin · ${count('open')} đang mở · ${count('closed')} đã chốt · ${count('expired')} hết hạn · ${count('hidden')} bị ẩn · ${us.length} tài khoản (${us.filter(u => u.banned).length} bị khóa)`;
+  $('tabListings').className = 'btn ' + (adminTab === 'listings' ? 'btn-green' : 'btn-light');
+  $('tabUsers').className = 'btn ' + (adminTab === 'users' ? 'btn-green' : 'btn-light');
+  $('purgeExpired').classList.toggle('hidden', adminTab !== 'listings');
+  const box = $('adminTable'); box.innerHTML = '';
+  const addRow = (html, actions) => {
     const row = document.createElement('div'); row.className = 'admin-row';
-    row.innerHTML = `<div><strong>${escapeHTML(item.material)}</strong> <span class="badge-off">${statusLabel(item) || ''}</span>
-      <small>${item.role === 'seller' ? 'Người bán' : 'Người mua'} · ${escapeHTML(item.name)} · ${escapeHTML(item.address)} · ${timeAgo(item.createdAt)}</small></div>
-      <div class="acts"><a class="btn btn-light" href="index.html?id=${encodeURIComponent(item.id)}">Xem</a>
-      <button class="btn btn-light" data-act="hide">${item.hidden ? 'Bỏ ẩn' : 'Ẩn'}</button><button class="btn btn-danger" data-act="del">Xóa</button></div>`;
-    row.querySelector('[data-act=hide]').onclick = async () => { await updateListing(item.id, { hidden: !item.hidden }, 'Đã cập nhật.'); renderAdmin(); };
-    row.querySelector('[data-act=del]').onclick = async () => {
-      if (!confirm('Xóa tin này vĩnh viễn?')) return;
-      const { error } = await sb.from('listings').delete().eq('id', item.id);
-      error ? toast(error.message, 'error') : (toast('Đã xóa.', 'ok'), renderAdmin());
-    };
-    $('adminTable').appendChild(row);
-  });
-  if (!all.length) $('adminTable').innerHTML = '<p class="field-help">Chưa có tin nào.</p>';
+    row.innerHTML = `<div>${html}</div><div class="acts"></div>`;
+    actions.forEach(([label, cls, fn, href]) => {
+      const el = document.createElement(href ? 'a' : 'button');
+      el.className = 'btn ' + cls; el.textContent = label;
+      if (href) el.href = href; else { el.type = 'button'; el.onclick = fn; }
+      row.querySelector('.acts').appendChild(el);
+    });
+    box.appendChild(row);
+  };
+  if (adminTab === 'listings') {
+    ls.filter(x => !q || normalize([x.name, x.material, x.address, emailOf[x.userId], phones[x.id]].join(' ')).includes(q)).forEach(item => {
+      const st = statusOf(item);
+      addRow(`<strong>${escapeHTML(item.material)}</strong>${st !== 'open' ? ` <span class="badge-off">${statusLabel(item)}</span>` : ''}
+        <small>${item.role === 'seller' ? 'Người bán' : 'Người mua'} · ${escapeHTML(item.name)} · ${escapeHTML(phones[item.id] || '')} · ${escapeHTML(item.address)}</small>
+        <small>Tài khoản: ${escapeHTML(emailOf[item.userId] || item.userId)} · ${timeAgo(item.createdAt)}</small>`, [
+        ['Xem', 'btn-light', null, 'index.html?id=' + encodeURIComponent(item.id)],
+        [item.hidden ? 'Bỏ ẩn' : 'Ẩn', 'btn-light', () => adminAct(sb.from('listings').update({ hidden: !item.hidden }).eq('id', item.id), 'Đã cập nhật.')],
+        ['Xóa', 'btn-danger', () => confirm('Xóa tin này vĩnh viễn?') && adminAct(sb.from('listings').delete().eq('id', item.id), 'Đã xóa tin.')]]);
+    });
+    if (!box.children.length) box.innerHTML = '<p class="field-help">Không có tin nào.</p>';
+  } else {
+    us.filter(u => !q || normalize(u.email).includes(q)).forEach(u => {
+      const self = session && u.id === session.user.id;
+      addRow(`<strong>${escapeHTML(u.email || '(không email)')}</strong>${u.role === 'admin' ? ' <span class="badge-mine">Admin</span>' : ''}${u.banned ? ' <span class="badge-off">Bị khóa</span>' : ''}${self ? ' <span class="badge-hidden">Bạn</span>' : ''}
+        <small>${u.listing_count} tin · Tạo ${fmtDate(u.created_at)}${u.last_sign_in_at ? ' · Đăng nhập gần nhất ' + timeAgo(u.last_sign_in_at) : ''}</small>`, self ? [] : [
+        [u.role === 'admin' ? 'Hạ quyền' : 'Cấp admin', 'btn-light', () => confirm(u.role === 'admin' ? 'Hạ tài khoản này xuống người dùng thường?' : 'Cấp quyền admin cho tài khoản này?') && adminAct(sb.rpc('admin_set_role', { uid: u.id, new_role: u.role === 'admin' ? 'user' : 'admin' }), 'Đã đổi quyền.')],
+        [u.banned ? 'Mở khóa' : 'Khóa', 'btn-light', () => adminAct(sb.rpc('admin_set_banned', { uid: u.id, ban: !u.banned }), u.banned ? 'Đã mở khóa.' : 'Đã khóa tài khoản.')],
+        ['Xóa tin của họ', 'btn-light', () => confirm('Xóa toàn bộ tin của tài khoản này?') && adminAct(sb.from('listings').delete().eq('user_id', u.id), 'Đã xóa tin của tài khoản.')],
+        ['Xóa tài khoản', 'btn-danger', () => confirm(`Xóa vĩnh viễn tài khoản ${u.email} cùng toàn bộ tin của họ?`) && adminAct(sb.rpc('admin_delete_user', { uid: u.id }), 'Đã xóa tài khoản.')]]);
+    });
+    if (!box.children.length) box.innerHTML = '<p class="field-help">Không có tài khoản nào.</p>';
+  }
 }
 
 /* ---------- form đăng tin ---------- */
