@@ -1,0 +1,6 @@
+[
+  {"id":"demo-s1","role":"seller","name":"Cô Lan - Ve chai sạch","phone":"0900000001","material":"Giấy / bìa carton","quantity":"Khoảng 25 kg","price":"5.000 đ/kg","address":"Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh","description":"Giấy và thùng carton đã phân loại. Có thể hẹn giờ lấy hàng.","lat":10.7782,"lng":106.7009},
+  {"id":"demo-b1","role":"buyer","name":"Điểm thu mua Minh Phát","phone":"0900000002","material":"Kim loại / sắt vụn","quantity":"Thu mua từ 10 kg","price":"Giá thỏa thuận theo loại","address":"Phường Đa Kao, Quận 1, TP. Hồ Chí Minh","description":"Nhận thu mua sắt vụn, nhôm và kim loại. Liên hệ trước khi giao.","lat":10.7901,"lng":106.6991},
+  {"id":"demo-s2","role":"seller","name":"Anh Nam","phone":"0900000003","material":"Nhựa","quantity":"Khoảng 12 kg chai nhựa","price":"3.000 đ/kg","address":"Phường Tân Định, Quận 1, TP. Hồ Chí Minh","description":"Chai nhựa đã gom riêng, sạch và khô.","lat":10.7898,"lng":106.6908},
+  {"id":"demo-b2","role":"buyer","name":"Thu mua ve chai Hòa Bình","phone":"0900000004","material":"Ve chai tổng hợp","quantity":"Không giới hạn","price":"Trao đổi khi liên hệ","address":"Phường Cô Giang, Quận 1, TP. Hồ Chí Minh","description":"Thu mua ve chai gia đình, có thể đến tận nơi trong khu vực gần đó.","lat":10.7652,"lng":106.6946}
+]

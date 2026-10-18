@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rác Xanh — Bản đồ thu mua ve chai</title>
+<meta name="description" content="Bản đồ cộng đồng kết nối người bán và người thu mua ve chai, phế liệu gần bạn.">
+<meta property="og:title" content="Rác Xanh — Bản đồ thu mua ve chai">
+<meta property="og:description" content="Tìm người mua, người bán ve chai gần bạn.">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style-extra.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html"><span class="brand-icon">♻</span><span>Rác Xanh<small>Kết nối mua bán ve chai</small></span></a>
+  <nav>
+    <a class="active" href="index.html">Bản đồ chung</a>
+    <a href="index.html?page=seller">Người bán đăng tin</a>
+    <a href="index.html?page=buyer">Người mua đăng tin</a>
+    <a id="adminLink" class="hidden" href="index.html?page=admin">Quản trị</a>
+    <span id="authArea" class="auth-area"></span>
+  </nav>
+</header>
+
+<main id="mapPage" class="map-page">
+  <section class="intro">
+    <div>
+      <p class="eyebrow">BẢN ĐỒ TÁI CHẾ CỘNG ĐỒNG</p>
+      <h1>Tìm người mua, người bán <span>gần bạn</span></h1>
+      <p>Chọn một điểm trên bản đồ để xem tin đăng, loại vật liệu, giá và thông tin liên hệ.</p>
+    </div>
+    <div class="quick-actions">
+      <a class="btn btn-green" href="index.html?page=seller">＋ Tôi muốn bán</a>
+      <a class="btn btn-orange" href="index.html?page=buyer">＋ Tôi muốn thu mua</a>
+    </div>
+  </section>
+
+  <section class="map-tools">
+    <div class="legend">
+      <span><i class="dot seller-dot"></i> Người bán</span>
+      <span><i class="dot buyer-dot"></i> Người mua</span>
+    </div>
+    <div class="filters">
+      <input id="searchBox" type="search" placeholder="Tìm theo tên, khu vực, từ khóa…" aria-label="Tìm kiếm tin đăng">
+      <select id="filterType" aria-label="Lọc theo vai trò">
+        <option value="all">Tất cả tin đăng</option>
+        <option value="seller">Người bán</option>
+        <option value="buyer">Người mua</option>
+      </select>
+      <select id="filterMaterial" aria-label="Lọc theo vật liệu"></select>
+      <select id="sortBy" aria-label="Sắp xếp">
+        <option value="newest">Mới nhất</option>
+        <option value="nearest">Gần tôi nhất</option>
+      </select>
+      <label class="check"><input type="checkbox" id="hideClosed"> Ẩn tin đã bán</label>
+      <label class="check"><input type="checkbox" id="inView"> Chỉ trong vùng đang xem</label>
+      <button id="locateBtn" class="btn btn-light" type="button">◎ Vị trí của tôi</button>
+    </div>
+  </section>
+
+  <section class="map-shell">
+    <div id="map" aria-label="Bản đồ các tin đăng"></div>
+    <aside class="map-sidebar">
+      <div class="sidebar-head">
+        <div><h2>Tin đăng trên bản đồ</h2><p id="listingCount">Đang tải tin đăng…</p></div>
+        <button id="resetMap" class="icon-btn" title="Đưa bản đồ về khu vực ban đầu">⌖</button>
+      </div>
+      <div id="listingList" class="listing-list"></div>
+      <p class="map-note">Bấm vào dấu xanh hoặc đỏ trên bản đồ để xem chi tiết.</p>
+    </aside>
+  </section>
+  <p class="footnote">Bản đồ © Esri, OpenStreetMap contributors. Tin đăng hiện được lưu trên trình duyệt này; muốn chia sẻ giữa nhiều thiết bị cần kết nối cơ sở dữ liệu trực tuyến.</p>
+</main>
+
+<main id="formPage" class="form-page hidden">
+  <a class="back-link" href="index.html">← Quay lại bản đồ chung</a>
+  <section class="form-card">
+    <div class="form-heading">
+      <div id="formIcon" class="big-icon">♻</div>
+      <div><p class="eyebrow" id="formEyebrow">ĐĂNG TIN</p><h1 id="formTitle">Đăng tin</h1><p id="formDesc">Thông tin đăng sẽ xuất hiện trên bản đồ chung.</p></div>
+    </div>
+    <form id="listingForm" novalidate>
+      <input type="hidden" id="role" value="seller">
+      <div class="field-grid">
+        <div class="field"><label for="name">Tên người đăng *</label><input id="name" required maxlength="70" placeholder="Ví dụ: Nguyễn Văn A"></div>
+        <div class="field"><label for="phone">Số điện thoại *</label><input id="phone" required inputmode="tel" maxlength="20" placeholder="Ví dụ: 0901234567"></div>
+        <div class="field"><label for="material">Loại vật liệu *</label><select id="material" required></select></div>
+        <div class="field"><label for="quantity">Số lượng</label><input id="quantity" maxlength="60" placeholder="Ví dụ: khoảng 20 kg"></div>
+        <div class="field"><label for="price">Giá dự kiến (VNĐ/kg hoặc mô tả)</label><input id="price" maxlength="80" placeholder="Ví dụ: 5.000 đ/kg hoặc thương lượng"></div>
+        <div class="field"><label for="address">Địa chỉ / khu vực *</label><input id="address" required maxlength="180" placeholder="Ví dụ: Quận 3, TP. Hồ Chí Minh"></div>
+        <div class="field"><label for="handover">Hình thức giao nhận</label>
+          <select id="handover"><option value="">Chưa xác định</option><option>Tôi tự mang đến</option><option>Cần người đến lấy</option><option>Thương lượng</option></select></div>
+        <div class="field"><label for="hours">Giờ liên hệ thuận tiện</label><input id="hours" maxlength="60" placeholder="Ví dụ: 8h–17h các ngày trong tuần"></div>
+      </div>
+      <div class="field"><label for="description">Mô tả thêm</label><textarea id="description" rows="4" maxlength="600" placeholder="Tình trạng vật liệu, có hỗ trợ vận chuyển…"></textarea></div>
+      <div class="field">
+        <label for="coords">Vị trí trên bản đồ *</label>
+        <p class="field-help">Nhấn nút lấy vị trí hiện tại hoặc chọn trực tiếp một điểm trên bản đồ bên dưới.</p>
+        <div class="location-row"><input id="coords" readonly placeholder="Chưa chọn vị trí"><button type="button" id="geoBtn" class="btn btn-light">◎ Lấy vị trí hiện tại</button></div>
+        <div id="pickMap"></div>
+        <label class="check"><input type="checkbox" id="fuzzy" checked> Chỉ hiển thị vị trí gần đúng (lệch khoảng 150 m) để bảo vệ địa chỉ nhà</label>
+      </div>
+      <div class="form-actions"><a class="btn btn-light" href="index.html">Hủy</a><button class="btn btn-green" type="submit">Đăng tin lên bản đồ</button></div>
+      <p id="formMessage" class="form-message" role="alert"></p>
+    </form>
+  </section>
+</main>
+
+<main id="adminPage" class="form-page hidden">
+  <a class="back-link" href="index.html">← Quay lại bản đồ chung</a>
+  <section class="form-card"><h1>Quản trị tin đăng</h1><p id="adminStats" class="field-help"></p><div id="adminTable" class="admin-table"></div></section>
+</main>
+<div id="authModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+  <div class="modal-backdrop" id="authBackdrop"></div>
+  <section class="detail-card">
+    <button id="authClose" class="close-btn" aria-label="Đóng">×</button>
+    <h2 id="authTitle">Đăng nhập</h2>
+    <p class="field-help" id="authHint">Đăng nhập để đăng tin và liên hệ người đăng.</p>
+    <form id="authForm" novalidate>
+      <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="email" required></div>
+      <div class="field"><label for="authPass">Mật khẩu (tối thiểu 8 ký tự)</label><input id="authPass" type="password" autocomplete="current-password" required></div>
+      <p id="authMsg" class="form-message" role="alert"></p>
+      <div class="detail-actions"><button class="btn btn-green" type="submit" id="authSubmit">Đăng nhập</button><button class="btn btn-light" type="button" id="authSwitch">Tạo tài khoản</button></div>
+    </form>
+  </section>
+</div>
+<div id="detailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+  <div class="modal-backdrop" id="closeBackdrop"></div>
+  <section class="detail-card"><button id="closeModal" class="close-btn" aria-label="Đóng">×</button><div id="detailContent"></div></section>
+</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<footer>♻ Rác Xanh · Thu gom hôm nay, xanh hơn ngày mai.</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
