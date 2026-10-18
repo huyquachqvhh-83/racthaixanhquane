@@ -10,6 +10,7 @@ const EXPIRE_DAYS = 14, DAY = 86400000;
 let listings = [], map, pickMap, markers = new Map(), pickMarker = null;
 let selectedCoords = null, userPos = null, lastFocus = null;
 let session = null, isAdmin = false, authMode = 'login';
+let people = {}, alerts = [], photoFiles = [];
 const $ = id => document.getElementById(id);
 
 /* ---------- tiện ích ---------- */
@@ -63,7 +64,7 @@ const closedLabel = x => x.role === 'seller' ? 'Đã bán' : 'Đã thu mua xong'
 const statusLabel = x => ({ closed: closedLabel(x), expired: 'Hết hạn', hidden: 'Bị admin ẩn' }[statusOf(x)]);
 const fromRow = r => ({ id: r.id, userId: r.user_id, role: r.role, name: r.name, material: r.material, quantity: r.quantity,
   price: r.price, address: r.address, handover: r.handover, hours: r.hours, description: r.description, lat: r.lat, lng: r.lng,
-  fuzzy: r.fuzzy, status: r.status, hidden: r.hidden, createdAt: r.created_at, expiresAt: r.expires_at });
+  fuzzy: r.fuzzy, photos: r.photos || [], status: r.status, hidden: r.hidden, createdAt: r.created_at, expiresAt: r.expires_at });
 
 async function loadListings() {
   const { data, error } = await sb.from('listings').select('*').order('created_at', { ascending: false });
@@ -76,6 +77,90 @@ async function updateListing(id, changes, msg) {
   toast(msg, 'ok');
 }
 
+/* ---------- hồ sơ công khai, ảnh, Zalo ---------- */
+async function loadPeople() {
+  const { data } = await sb.from('public_profiles').select('*');
+  people = Object.fromEntries((data || []).map(p => [p.id, p]));
+}
+const trustBadges = uid => {
+  const p = people[uid]; if (!p) return '';
+  return (p.verified ? '<span class="badge-verified">✔ Đã xác minh</span>' : '') +
+         (p.review_count > 0 ? `<span class="rating">★ ${p.avg_rating} (${p.review_count})</span>` : '');
+};
+const zaloNum = p => { p = p.replace('+', ''); return p.startsWith('0') ? '84' + p.slice(1) : p; };
+async function removePhotos(item) {
+  const paths = (item.photos || []).map(u => u.split('/listing-photos/')[1]).filter(Boolean);
+  if (paths.length) await sb.storage.from('listing-photos').remove(paths);
+}
+async function getPhone(item) {
+  if (!session) { closeDetail(); openAuth('login', 'Vui lòng đăng nhập để liên hệ người đăng.'); return null; }
+  const { data, error } = await sb.from('listing_contacts').select('phone').eq('listing_id', item.id).single();
+  if (error || !data) { toast('Không lấy được thông tin liên hệ.', 'error'); return null; }
+  return cleanPhone(data.phone);
+}
+function compressImage(file, max = 1280, quality = 0.8) {   // vẽ lại bằng canvas: nhỏ hơn và xóa dữ liệu vị trí (EXIF)
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      c.toBlob(b => b ? res(b) : rej(new Error('Không xử lý được ảnh')), 'image/jpeg', quality);
+    };
+    img.onerror = () => rej(new Error('Ảnh không hợp lệ')); img.src = url;
+  });
+}
+
+/* ---------- cảnh báo tin mới ---------- */
+async function loadAlerts() {
+  if (!session) { alerts = []; return; }
+  const { data } = await sb.from('alerts').select('*').order('created_at', { ascending: false });
+  alerts = data || [];
+}
+const matchesFor = a => listings.filter(x => statusOf(x) === 'open' && !mine(x) && new Date(x.createdAt) > new Date(a.last_seen)
+  && (a.target_role === 'any' || x.role === a.target_role) && (!a.material || x.material === a.material)
+  && distanceKm({ lat: a.lat, lng: a.lng }, x) <= a.radius_km);
+function updateBell() {
+  const n = alerts.reduce((t, a) => t + matchesFor(a).length, 0), b = $('bellCount');
+  if (b) { b.textContent = n; b.classList.toggle('hidden', !n); }
+}
+const closeAlerts = () => $('alertModal').classList.add('hidden');
+function openAlerts() {
+  if (!session) return openAuth('login', 'Đăng nhập để nhận thông báo tin mới.');
+  const rows = alerts.map(a => ({ a, m: matchesFor(a) }));
+  const roleTxt = r => r === 'seller' ? 'tin người bán' : r === 'buyer' ? 'tin người mua' : 'mọi tin';
+  $('alertContent').innerHTML = (rows.length ? rows.map(({ a, m }) => `<div class="alert-item"><div>
+      <strong>${escapeHTML(a.material || 'Mọi loại vật liệu')}</strong> · ${roleTxt(a.target_role)} · ${a.radius_km} km
+      <small>${m.length ? m.length + ' tin mới' : 'Chưa có tin mới'}</small>
+      ${m.map(x => `<button class="alert-match" data-l="${x.id}" type="button">${escapeHTML(x.material)} · ${escapeHTML(x.address)}</button>`).join('')}
+    </div><button class="btn btn-light" data-del="${a.id}" type="button">Xóa</button></div>`).join('')
+    : '<p class="field-help">Bạn chưa có cảnh báo nào. Tạo một cảnh báo để biết ngay khi có tin phù hợp.</p>') + `
+    <h3 class="rv-title">Tạo cảnh báo mới</h3>
+    <div class="field"><label for="alMat">Vật liệu</label><select id="alMat"></select></div>
+    <div class="field"><label for="alRole">Nhận tin của</label><select id="alRole"><option value="seller">Người bán</option><option value="buyer">Người mua</option><option value="any">Cả hai</option></select></div>
+    <div class="field"><label for="alRad">Bán kính quanh vị trí đang xem trên bản đồ</label><select id="alRad"><option>1</option><option>3</option><option selected>5</option><option>10</option></select></div>
+    <button class="btn btn-green contact-btn" id="alAdd" type="button">＋ Tạo cảnh báo</button>`;
+  fillMaterials($('alMat'), 'Mọi loại vật liệu');
+  $('alertContent').querySelectorAll('[data-l]').forEach(b => b.onclick = () => {
+    const it = listings.find(x => x.id === b.dataset.l); closeAlerts(); map.setView([it.lat, it.lng], 16); showDetail(it);
+  });
+  $('alertContent').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    await sb.from('alerts').delete().eq('id', b.dataset.del); await loadAlerts(); updateBell(); openAlerts();
+  });
+  $('alAdd').onclick = async () => {
+    if (!map) return toast('Hãy mở bản đồ chung để chọn khu vực.', 'error');
+    const c = map.getCenter();
+    const { error } = await sb.from('alerts').insert({ material: $('alMat').value || null, target_role: $('alRole').value, radius_km: +$('alRad').value, lat: c.lat, lng: c.lng });
+    if (error) return toast('Không tạo được: ' + error.message, 'error');
+    toast('Đã tạo cảnh báo.', 'ok'); await loadAlerts(); updateBell(); openAlerts();
+  };
+  $('alertModal').classList.remove('hidden');
+  if (rows.some(r => r.m.length)) {            // đánh dấu đã xem
+    const now = new Date().toISOString();
+    sb.from('alerts').update({ last_seen: now }).eq('user_id', session.user.id).then(() => { alerts.forEach(a => a.last_seen = now); updateBell(); });
+  }
+}
+
 /* ---------- đăng nhập ---------- */
 async function refreshAuth() {
   session = (await sb.auth.getSession()).data.session;
@@ -86,9 +171,10 @@ async function refreshAuth() {
   }
   $('adminLink').classList.toggle('hidden', !isAdmin);
   $('authArea').innerHTML = session
-    ? `<span>${escapeHTML(session.user.email)}${isAdmin ? ' · <b>Admin</b>' : ''}</span><button class="btn btn-light" id="logoutBtn" type="button">Đăng xuất</button>`
+    ? `<button class="btn btn-light bell" id="bellBtn" type="button" aria-label="Thông báo">🔔<span id="bellCount" class="bell-count hidden">0</span></button><span>${escapeHTML(session.user.email)}${isAdmin ? ' · <b>Admin</b>' : ''}</span><button class="btn btn-light" id="logoutBtn" type="button">Đăng xuất</button>`
     : '<button class="btn btn-green" id="loginBtn" type="button">Đăng nhập</button>';
   if ($('logoutBtn')) $('logoutBtn').onclick = async () => { await sb.auth.signOut(); location.href = 'index.html'; };
+  if ($('bellBtn')) $('bellBtn').onclick = () => map ? openAlerts() : (location.href = 'index.html?alerts=1');
   if ($('loginBtn')) $('loginBtn').onclick = () => openAuth('login');
 }
 function openAuth(mode, hint) {
@@ -104,6 +190,7 @@ function openAuth(mode, hint) {
 const closeAuth = () => $('authModal').classList.add('hidden');
 function setupAuthUI() {
   $('authClose').onclick = closeAuth; $('authBackdrop').onclick = closeAuth;
+  $('alertClose').onclick = closeAlerts; $('alertBackdrop').onclick = closeAlerts;
   $('authSwitch').onclick = () => openAuth(authMode === 'login' ? 'signup' : 'login');
   $('authForm').onsubmit = async e => {
     e.preventDefault();
@@ -115,7 +202,7 @@ function setupAuthUI() {
     if (authMode === 'signup' && !res.data.session) { $('authMsg').textContent = 'Đã gửi email xác nhận. Hãy mở email rồi quay lại đăng nhập.'; return; }
     location.reload();
   };
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeAuth(); closeDetail(); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeAuth(); closeDetail(); closeAlerts(); } });
 }
 
 /* ---------- khởi động ---------- */
@@ -133,7 +220,9 @@ async function init() {
   }
   fillMaterials($('filterMaterial'), 'Mọi loại vật liệu');
   listings = await loadListings();
-  setupMap(); renderListings();
+  await Promise.all([loadPeople(), loadAlerts()]);
+  setupMap(); renderListings(); updateBell();
+  if (params.get('alerts')) openAlerts();
   if (params.get('posted')) toast(`Đăng tin thành công! Tin hiển thị ${EXPIRE_DAYS} ngày.`, 'ok');
   const target = listings.find(x => x.id === params.get('id'));
   if (target) { map.setView([target.lat, target.lng], 16); showDetail(target); }
@@ -202,8 +291,8 @@ function renderListings() {
     const st = statusOf(item), dist = userPos ? ` · ${distanceKm(userPos, item).toFixed(1)} km` : '';
     const card = document.createElement('button');
     card.className = 'listing-item' + (mine(item) ? ' mine' : '') + (st !== 'open' ? ' is-closed' : '');
-    card.innerHTML = `<span class="mini-dot ${item.role === 'seller' ? 'seller-dot' : 'buyer-dot'}"></span>
-      <span class="listing-item-body"><strong>${escapeHTML(item.material)}${mine(item) ? '<span class="badge-mine">Của tôi</span>' : ''}${st !== 'open' ? `<span class="badge-off">${statusLabel(item)}</span>` : ''}</strong>
+    card.innerHTML = `${item.photos[0] ? `<img class="thumb" src="${escapeHTML(item.photos[0])}" alt="" loading="lazy">` : ''}<span class="mini-dot ${item.role === 'seller' ? 'seller-dot' : 'buyer-dot'}"></span>
+      <span class="listing-item-body"><strong>${escapeHTML(item.material)}${people[item.userId]?.verified ? '<span class="badge-verified">✔</span>' : ''}${mine(item) ? '<span class="badge-mine">Của tôi</span>' : ''}${st !== 'open' ? `<span class="badge-off">${statusLabel(item)}</span>` : ''}</strong>
       <small>${item.role === 'seller' ? 'Người bán' : 'Người mua'} · ${escapeHTML(item.address)}${dist} · ${timeAgo(item.createdAt)}</small>
       <span>${escapeHTML(item.name)} · ${money(item.price)}</span></span><span class="chevron">›</span>`;
     card.onclick = () => { map.setView([item.lat, item.lng], 16); showDetail(item); };
@@ -220,13 +309,16 @@ function showDetail(item) {
   $('detailContent').innerHTML = `
     <span class="role-pill ${st === 'closed' ? 'pill-closed' : isSeller ? 'pill-seller' : 'pill-buyer'}">${st === 'closed' ? '✔ ' + closedLabel(item) : isSeller ? '● Người bán' : '● Người mua'}</span>
     <h2 id="detailTitle">${escapeHTML(item.material)}</h2>
-    <p class="detail-person">${escapeHTML(item.name)}</p>
+    <p class="detail-person">${escapeHTML(item.name)} ${trustBadges(item.userId)}</p>
     <p class="detail-meta">Đăng ${timeAgo(item.createdAt)}${st === 'open' ? ' · Còn hiệu lực đến ' + fmtDate(item.expiresAt) : ''}${item.fuzzy ? ' · Vị trí gần đúng' : ''}</p>
     ${st === 'closed' ? `<p class="status-banner sold">✔ ${closedLabel(item).toUpperCase()}. Tin này không còn nhận liên hệ.</p>` : st === 'expired' ? '<p class="status-banner">⚠ Tin đã hết hạn, có thể không còn nữa.</p>' : st === 'hidden' ? '<p class="status-banner">Tin đang bị admin ẩn khỏi bản đồ chung.</p>' : ''}
+    ${item.photos.length ? `<div class="gallery">${item.photos.map(u => `<a href="${escapeHTML(u)}" target="_blank" rel="noopener"><img src="${escapeHTML(u)}" alt="Ảnh tin đăng" loading="lazy"></a>`).join('')}</div>` : ''}
     <div class="detail-price">${money(item.price)}</div>
     <div class="detail-facts">${facts}</div>
     <p class="detail-description">${escapeHTML(item.description || 'Không có mô tả thêm.')}</p>
-    ${st === 'open' ? '<button class="btn btn-green contact-btn" id="callBtn" type="button">☎ Gọi ngay</button>' : ''}
+    ${st === 'open' ? '<div class="contact-row"><button class="btn btn-green" id="callBtn" type="button">☎ Gọi ngay</button><button class="btn btn-zalo" id="zaloBtn" type="button">💬 Zalo</button></div>' : ''}
+    ${st === 'closed' && session && !mine(item) ? '<div id="reviewBox"><button class="btn btn-light reveal-btn" id="reviewBtn" type="button">★ Đánh giá người đăng</button></div>' : ''}
+    <div id="reviewList"></div>
     <div class="detail-actions">
       <a class="btn btn-light" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${Number(item.lat)},${Number(item.lng)}">➤ Chỉ đường</a>
       <button class="btn btn-light" id="shareBtn" type="button">🔗 Chia sẻ</button>
@@ -235,12 +327,8 @@ function showDetail(item) {
       ${isAdmin ? `<button class="btn btn-light" id="hideBtn" type="button">${item.hidden ? '👁 Bỏ ẩn tin' : '🚫 Ẩn tin (admin)'}</button>` : ''}
       ${mgr ? '<button class="btn btn-danger" id="deleteBtn" type="button">Xóa tin</button>' : ''}
     </div>`;
-  if ($('callBtn')) $('callBtn').onclick = async () => {
-    if (!session) { closeDetail(); return openAuth('login', 'Vui lòng đăng nhập để liên hệ người đăng.'); }
-    const { data, error } = await sb.from('listing_contacts').select('phone').eq('listing_id', item.id).single();
-    if (error || !data) return toast('Không lấy được thông tin liên hệ.', 'error');
-    location.href = 'tel:' + cleanPhone(data.phone);
-  };
+  if ($('callBtn')) $('callBtn').onclick = async () => { const p = await getPhone(item); if (p) location.href = 'tel:' + p; };
+  if ($('zaloBtn')) $('zaloBtn').onclick = async () => { const p = await getPhone(item); if (p) window.open('https://zalo.me/' + zaloNum(p), '_blank', 'noopener'); };
   $('shareBtn').onclick = async () => {
     const url = location.origin + location.pathname + '?id=' + encodeURIComponent(item.id);
     try { await navigator.clipboard.writeText(url); toast('Đã sao chép liên kết.', 'ok'); } catch { prompt('Sao chép liên kết:', url); }
@@ -251,14 +339,34 @@ function showDetail(item) {
     $('renewBtn').onclick = () => apply({ status: 'open', expires_at: newExp() }, 'Đã gia hạn ' + EXPIRE_DAYS + ' ngày.');
     $('deleteBtn').onclick = async () => {
       if (!confirm('Xóa tin này vĩnh viễn?')) return;
+      await removePhotos(item);
       const { error } = await sb.from('listings').delete().eq('id', item.id);
       if (error) return toast(error.message, 'error');
       listings = await loadListings(); renderListings(); closeDetail(); toast('Đã xóa tin.', 'ok');
     };
   }
   if (isAdmin) $('hideBtn').onclick = () => apply({ hidden: !item.hidden }, item.hidden ? 'Đã bỏ ẩn tin.' : 'Đã ẩn tin.');
+  setupExtras(item);
   lastFocus = document.activeElement;
   $('detailModal').classList.remove('hidden'); $('closeModal').focus();
+}
+async function loadReviews(item) {
+  const box = $('reviewList'); if (!box) return;
+  const { data } = await sb.from('reviews').select('rating, comment, created_at').eq('reviewee_id', item.userId).order('created_at', { ascending: false }).limit(3);
+  box.innerHTML = data?.length ? '<h3 class="rv-title">Đánh giá gần đây</h3>' + data.map(r => `<div class="rv"><span class="stars">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span> <small>${timeAgo(r.created_at)}</small>${r.comment ? `<p>${escapeHTML(r.comment)}</p>` : ''}</div>`).join('') : '';
+}
+function setupExtras(item) {
+  loadReviews(item);
+  if (!$('reviewBtn')) return;
+  $('reviewBtn').onclick = () => {
+    $('reviewBox').innerHTML = `<div class="field"><label for="rvStars">Chấm điểm</label><select id="rvStars"><option value="5">★★★★★ Rất tốt</option><option value="4">★★★★ Tốt</option><option value="3">★★★ Bình thường</option><option value="2">★★ Chưa tốt</option><option value="1">★ Tệ</option></select></div>
+      <div class="field"><textarea id="rvText" maxlength="300" rows="3" placeholder="Nhận xét (không bắt buộc)"></textarea></div><button class="btn btn-green contact-btn" id="rvSend" type="button">Gửi đánh giá</button>`;
+    $('rvSend').onclick = async () => {
+      const { error } = await sb.from('reviews').insert({ listing_id: item.id, reviewee_id: item.userId, rating: +$('rvStars').value, comment: $('rvText').value.trim() });
+      if (error) return toast(error.code === '23505' ? 'Bạn đã đánh giá tin này rồi.' : 'Không gửi được: ' + error.message, 'error');
+      toast('Cảm ơn bạn đã đánh giá!', 'ok'); await loadPeople(); renderListings(); showDetail(item);
+    };
+  };
 }
 function closeDetail() {
   if ($('detailModal').classList.contains('hidden')) return;
@@ -318,16 +426,17 @@ function drawAdmin() {
         <small>Tài khoản: ${escapeHTML(emailOf[item.userId] || item.userId)} · ${timeAgo(item.createdAt)}</small>`, [
         ['Xem', 'btn-light', null, 'index.html?id=' + encodeURIComponent(item.id)],
         [item.hidden ? 'Bỏ ẩn' : 'Ẩn', 'btn-light', () => adminAct(sb.from('listings').update({ hidden: !item.hidden }).eq('id', item.id), 'Đã cập nhật.')],
-        ['Xóa', 'btn-danger', () => confirm('Xóa tin này vĩnh viễn?') && adminAct(sb.from('listings').delete().eq('id', item.id), 'Đã xóa tin.')]]);
+        ['Xóa', 'btn-danger', async () => { if (!confirm('Xóa tin này vĩnh viễn?')) return; await removePhotos(item); adminAct(sb.from('listings').delete().eq('id', item.id), 'Đã xóa tin.'); }]]);
     });
     if (!box.children.length) box.innerHTML = '<p class="field-help">Không có tin nào.</p>';
   } else {
     us.filter(u => !q || normalize(u.email).includes(q)).forEach(u => {
       const self = session && u.id === session.user.id;
-      addRow(`<strong>${escapeHTML(u.email || '(không email)')}</strong>${u.role === 'admin' ? ' <span class="badge-mine">Admin</span>' : ''}${u.banned ? ' <span class="badge-off">Bị khóa</span>' : ''}${self ? ' <span class="badge-hidden">Bạn</span>' : ''}
+      addRow(`<strong>${escapeHTML(u.email || '(không email)')}</strong>${u.role === 'admin' ? ' <span class="badge-mine">Admin</span>' : ''}${u.verified ? ' <span class="badge-verified">✔ Xác minh</span>' : ''}${u.banned ? ' <span class="badge-off">Bị khóa</span>' : ''}${self ? ' <span class="badge-hidden">Bạn</span>' : ''}
         <small>${u.listing_count} tin · Tạo ${fmtDate(u.created_at)}${u.last_sign_in_at ? ' · Đăng nhập gần nhất ' + timeAgo(u.last_sign_in_at) : ''}</small>`, self ? [] : [
         [u.role === 'admin' ? 'Hạ quyền' : 'Cấp admin', 'btn-light', () => confirm(u.role === 'admin' ? 'Hạ tài khoản này xuống người dùng thường?' : 'Cấp quyền admin cho tài khoản này?') && adminAct(sb.rpc('admin_set_role', { uid: u.id, new_role: u.role === 'admin' ? 'user' : 'admin' }), 'Đã đổi quyền.')],
         [u.banned ? 'Mở khóa' : 'Khóa', 'btn-light', () => adminAct(sb.rpc('admin_set_banned', { uid: u.id, ban: !u.banned }), u.banned ? 'Đã mở khóa.' : 'Đã khóa tài khoản.')],
+        [u.verified ? 'Gỡ xác minh' : 'Xác minh', 'btn-light', () => adminAct(sb.rpc('admin_set_verified', { uid: u.id, val: !u.verified }), 'Đã cập nhật huy hiệu.')],
         ['Xóa tin của họ', 'btn-light', () => confirm('Xóa toàn bộ tin của tài khoản này?') && adminAct(sb.from('listings').delete().eq('user_id', u.id), 'Đã xóa tin của tài khoản.')],
         ['Xóa tài khoản', 'btn-danger', () => confirm(`Xóa vĩnh viễn tài khoản ${u.email} cùng toàn bộ tin của họ?`) && adminAct(sb.rpc('admin_delete_user', { uid: u.id }), 'Đã xóa tài khoản.')]]);
     });
@@ -350,9 +459,32 @@ function setupForm(role) {
     navigator.geolocation.getCurrentPosition(p => { setCoords(p.coords.latitude, p.coords.longitude); pickMap.setView([p.coords.latitude, p.coords.longitude], 16); },
       () => showMsg('Không lấy được vị trí. Hãy cấp quyền định vị hoặc chọn điểm trực tiếp trên bản đồ.'));
   };
+  $('addrSearch').onclick = searchAddress;
+  $('address').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); searchAddress(); } });
+  $('photos').onchange = onPhotos;
   $('listingForm').onsubmit = submitListing;
   setTimeout(() => pickMap.invalidateSize(), 100);
   if (!session) openAuth('login', 'Bạn cần đăng nhập để đăng tin.');
+}
+async function searchAddress() {
+  const q = $('address').value.trim(), box = $('addrResults');
+  if (q.length < 3) return showMsg('Nhập ít nhất 3 ký tự để tìm địa chỉ.');
+  box.innerHTML = '<small>Đang tìm…</small>';
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=vn&accept-language=vi&q=' + encodeURIComponent(q));
+    const d = await r.json();
+    box.innerHTML = d.length ? '' : '<small>Không tìm thấy. Hãy thử gõ cụ thể hơn hoặc chấm điểm trực tiếp trên bản đồ.</small>';
+    d.forEach(p => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'addr-item'; b.textContent = p.display_name;
+      b.onclick = () => { setCoords(+p.lat, +p.lon); pickMap.setView([+p.lat, +p.lon], 17); $('address').value = p.display_name.split(', ').slice(0, 4).join(', '); box.innerHTML = ''; };
+      box.appendChild(b);
+    });
+  } catch { box.innerHTML = '<small>Không tìm được lúc này. Hãy chấm điểm trực tiếp trên bản đồ.</small>'; }
+}
+function onPhotos(e) {
+  photoFiles = [...e.target.files].filter(f => f.type.startsWith('image/')).slice(0, 3);
+  if (e.target.files.length > 3) toast('Chỉ lấy 3 ảnh đầu tiên.');
+  $('photoPreview').innerHTML = photoFiles.map(f => `<img src="${URL.createObjectURL(f)}" alt="Xem trước">`).join('');
 }
 function setCoords(lat, lng) {
   selectedCoords = { lat, lng }; $('coords').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`; showMsg('');
@@ -376,12 +508,21 @@ async function submitListing(e) {
   let { lat, lng } = selectedCoords; const fuzzy = $('fuzzy').checked;
   if (fuzzy) ({ lat, lng } = fuzz(lat, lng));
   const btn = e.submitter; if (btn) btn.disabled = true;
+  const id = crypto.randomUUID(), photos = [], uploaded = [];
+  try {
+    for (const [i, f] of photoFiles.entries()) {
+      const path = `${session.user.id}/${id}-${i}.jpg`;
+      const { error } = await sb.storage.from('listing-photos').upload(path, await compressImage(f), { contentType: 'image/jpeg' });
+      if (error) throw error;
+      uploaded.push(path); photos.push(sb.storage.from('listing-photos').getPublicUrl(path).data.publicUrl);
+    }
+  } catch (err) { if (btn) btn.disabled = false; return showMsg('Không tải ảnh lên được: ' + err.message); }
   const { data, error } = await sb.from('listings').insert({
-    role: $('role').value, name: $('name').value.trim(), material: $('material').value, quantity: $('quantity').value.trim(),
+    id, photos, role: $('role').value, name: $('name').value.trim(), material: $('material').value, quantity: $('quantity').value.trim(),
     price: $('price').value.trim(), address: $('address').value.trim(), handover: $('handover').value, hours: $('hours').value.trim(),
     description: $('description').value.trim(), lat, lng, fuzzy
   }).select('id').single();
-  if (error) { if (btn) btn.disabled = false; return showMsg('Không đăng được tin: ' + error.message); }
+  if (error) { if (uploaded.length) sb.storage.from('listing-photos').remove(uploaded); if (btn) btn.disabled = false; return showMsg('Không đăng được tin: ' + error.message); }
   const c = await sb.from('listing_contacts').insert({ listing_id: data.id, phone: cleanPhone($('phone').value) });
   if (c.error) { await sb.from('listings').delete().eq('id', data.id); if (btn) btn.disabled = false; return showMsg('Không lưu được số điện thoại: ' + c.error.message); }
   location.href = 'index.html?posted=1&id=' + data.id;
