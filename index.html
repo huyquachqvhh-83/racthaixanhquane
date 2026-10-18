@@ -108,7 +108,12 @@
 
 <main id="adminPage" class="form-page hidden">
   <a class="back-link" href="index.html">← Quay lại bản đồ chung</a>
-  <section class="form-card"><h1>Quản trị tin đăng</h1><p id="adminStats" class="field-help"></p><div id="adminTable" class="admin-table"></div></section>
+  <section class="form-card">
+    <h1>Quản trị</h1><p id="adminStats" class="field-help"></p>
+    <div class="admin-tabs"><button class="btn btn-green" id="tabListings" type="button">Tin đăng</button><button class="btn btn-light" id="tabUsers" type="button">Tài khoản</button></div>
+    <div class="admin-toolbar"><input id="adminSearch" type="search" placeholder="Tìm theo email, tên, số điện thoại, khu vực…" aria-label="Tìm trong trang quản trị"><button class="btn btn-danger" id="purgeExpired" type="button">Xóa tin hết hạn</button></div>
+    <div id="adminTable" class="admin-table"></div>
+  </section>
 </main>
 <div id="authModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle">
   <div class="modal-backdrop" id="authBackdrop"></div>
