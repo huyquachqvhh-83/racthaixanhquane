@@ -49,3 +49,29 @@
 .admin-toolbar{display:flex;gap:8px;flex-wrap:wrap}
 .admin-toolbar input{flex:1;min-width:220px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px}
 @media(max-width:650px){.admin-row{grid-template-columns:1fr}}
+/* ảnh, huy hiệu, đánh giá, Zalo, chuông, cảnh báo, gợi ý địa chỉ */
+.listing-item .thumb{width:54px;height:54px;border-radius:10px;object-fit:cover;flex-shrink:0;background:#e2e9e5}
+.gallery{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);gap:8px;overflow-x:auto;margin:6px 0 10px;scroll-snap-type:x mandatory}
+.gallery img{width:100%;height:150px;object-fit:cover;border-radius:12px;display:block;scroll-snap-align:start}
+.badge-verified{display:inline-block;background:#e0f2fe;color:#075985;font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:6px;vertical-align:middle}
+.rating{display:inline-block;color:#b45309;font-size:12px;font-weight:700;margin-left:6px}
+.stars{color:#f59e0b;letter-spacing:1px}
+.rv-title{font-size:13px;margin:16px 0 6px}
+.rv{border-top:1px solid var(--line);padding:8px 0;font-size:12px}
+.rv p{margin:4px 0 0;color:#53655b}
+.contact-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.contact-row .btn{width:100%}
+.btn-zalo{background:#0068ff;color:#fff}
+.btn-zalo:hover{background:#0054cc}
+.bell{position:relative;padding:8px 11px}
+.bell-count{position:absolute;top:-6px;right:-6px;background:#dc2626;color:#fff;font-size:10px;font-weight:800;min-width:18px;height:18px;border-radius:9px;display:grid;place-items:center;padding:0 4px}
+.alert-card{max-height:86vh;overflow-y:auto}
+.alert-item{display:flex;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:8px;font-size:12px}
+.alert-item small{display:block;color:var(--muted);margin:3px 0 6px}
+.alert-match{display:block;width:100%;text-align:left;border:0;background:var(--green-pale);color:var(--green-dark);border-radius:8px;padding:7px 9px;margin-top:5px;font-size:11px;font-weight:700;cursor:pointer}
+.addr-results{display:flex;flex-direction:column;gap:4px}
+.addr-item{text-align:left;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 10px;font-size:12px;cursor:pointer;color:var(--ink)}
+.addr-item:hover{background:var(--green-pale)}
+.photo-preview{display:flex;gap:8px;flex-wrap:wrap}
+.photo-preview img{width:84px;height:84px;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+@media(prefers-color-scheme:dark){.addr-item{background:#16211c;color:var(--ink)}.badge-verified{background:#0c3b57;color:#bde4fb}.alert-match{background:#1a3a2c;color:#8fe0bb}}
