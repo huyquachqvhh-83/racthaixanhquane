@@ -87,12 +87,13 @@
         <div class="field"><label for="material">Loại vật liệu *</label><select id="material" required></select></div>
         <div class="field"><label for="quantity">Số lượng</label><input id="quantity" maxlength="60" placeholder="Ví dụ: khoảng 20 kg"></div>
         <div class="field"><label for="price">Giá dự kiến (VNĐ/kg hoặc mô tả)</label><input id="price" maxlength="80" placeholder="Ví dụ: 5.000 đ/kg hoặc thương lượng"></div>
-        <div class="field"><label for="address">Địa chỉ / khu vực *</label><input id="address" required maxlength="180" placeholder="Ví dụ: Quận 3, TP. Hồ Chí Minh"></div>
+        <div class="field"><label for="address">Địa chỉ / khu vực *</label><input id="address" required maxlength="180" placeholder="Gõ địa chỉ rồi bấm Tìm hoặc Enter"><button type="button" id="addrSearch" class="btn btn-light">🔍 Tìm trên bản đồ</button><div id="addrResults" class="addr-results"></div></div>
         <div class="field"><label for="handover">Hình thức giao nhận</label>
           <select id="handover"><option value="">Chưa xác định</option><option>Tôi tự mang đến</option><option>Cần người đến lấy</option><option>Thương lượng</option></select></div>
         <div class="field"><label for="hours">Giờ liên hệ thuận tiện</label><input id="hours" maxlength="60" placeholder="Ví dụ: 8h–17h các ngày trong tuần"></div>
       </div>
       <div class="field"><label for="description">Mô tả thêm</label><textarea id="description" rows="4" maxlength="600" placeholder="Tình trạng vật liệu, có hỗ trợ vận chuyển…"></textarea></div>
+      <div class="field"><label for="photos">Ảnh (tối đa 3, tự nén nhỏ)</label><input id="photos" type="file" accept="image/*" multiple><div id="photoPreview" class="photo-preview"></div></div>
       <div class="field">
         <label for="coords">Vị trí trên bản đồ *</label>
         <p class="field-help">Nhấn nút lấy vị trí hiện tại hoặc chọn trực tiếp một điểm trên bản đồ bên dưới.</p>
@@ -132,6 +133,10 @@
 <div id="detailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
   <div class="modal-backdrop" id="closeBackdrop"></div>
   <section class="detail-card"><button id="closeModal" class="close-btn" aria-label="Đóng">×</button><div id="detailContent"></div></section>
+</div>
+<div id="alertModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="alertTitle">
+  <div class="modal-backdrop" id="alertBackdrop"></div>
+  <section class="detail-card alert-card"><button id="alertClose" class="close-btn" aria-label="Đóng">×</button><h2 id="alertTitle">🔔 Thông báo của tôi</h2><div id="alertContent"></div></section>
 </div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <footer>♻ Rác Xanh · Thu gom hôm nay, xanh hơn ngày mai.</footer>
